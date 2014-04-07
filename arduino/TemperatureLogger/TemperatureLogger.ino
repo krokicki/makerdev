@@ -9,7 +9,6 @@
 
 #include <avr/sleep.h>
 #include <avr/power.h>
-#include <avr/power.h>
 #include <Wire.h>
 #include <DS3231.h>
 #include <Fat16.h>
@@ -48,7 +47,7 @@ int oneWirePin = 6;
 int ledPin = 13; 
 
 DS3231 RTC; //Create RTC object for DS3231 RTC come Temp Sensor 
-static DateTime interruptTime;
+DateTime interruptTime;
 SdCard card;
 Fat16 file;
 Battery battery;
@@ -56,19 +55,19 @@ OneWire ds(oneWirePin);
 
 void setup () {
     /* Initialize INT0 pin for accepting interrupts */
-    PORTD |= 0x04; 
-    DDRD &=~ 0x04;
-    pinMode(4, INPUT); //extern power
+    PORTD |= 0x04; // set pin 2 to HIGH 
+    DDRD &=~ 0x04; // set pin 2 to OUTPUT
+    
+    pinMode(4, INPUT); // control SD card power
+    pinMode(ledPin, OUTPUT);
+    Wire.begin();    
+    RTC.begin();
 
     #ifdef DEBUG 
       Serial.begin(57600);
     #endif
     
-    pinMode(ledPin, OUTPUT);
-    Wire.begin();    
-    RTC.begin();
-     
-    attachInterrupt(0, INT0_ISR, LOW); //Only LOW level interrupt can wake up from PWR_DOWN
+    attachInterrupt(0, INT0_ISR, LOW); // Only LOW level interrupt can wake up from PWR_DOWN
     set_sleep_mode(SLEEP_MODE_PWR_DOWN);
  
     // Enable Interrupt 
@@ -121,10 +120,6 @@ void loop () {
       filenameStr += "0";
     }
     filenameStr += now.month();
-//    if (now.date() < 10) {
-//      filenameStr += "0";
-//    }
-//    filenameStr += now.date();
     filenameStr += ".LOG";
       
     char filename[filenameStr.length()+1];
@@ -326,7 +321,6 @@ void Error_P(PGM_P str) {
     file.println("SD error: ");
     file.println(card.errorCode, HEX);
   }
-  //while(1);
 }
 
   
@@ -334,7 +328,7 @@ void Error_P(PGM_P str) {
 void INT0_ISR()
 {
     //Keep this as short as possible. Possibly avoid using function calls
-    detachInterrupt(0); 
-    interruptTime = DateTime(interruptTime.get() + LOOP_INTERVAL_SEC);  // Decide the time for next interrupt, configure next interrupt  
+    detachInterrupt(0); // The interrupt must be detached otherwise the interrupt will keep happening and the ISR will be repeatedly called until the pin changes state.
+    interruptTime = DateTime(interruptTime.get() + LOOP_INTERVAL_SEC);  // Decide the time for next interrupt, configure next interrupt.
 }
 
