@@ -53,7 +53,7 @@ module fan_mount(panel_thickness, mounting_hole_distance) {
 				}
 
 				// Long funnel
-				cylinder(r1 = fan_dia / 2, r2 = fan_dia / 2.625, h = 50);
+				cylinder(r1 = fan_dia / 2, r2 = fan_dia / 2.625, h = 60);
 			}
 
 			// Screw holes
@@ -96,6 +96,19 @@ module fan_mount(panel_thickness, mounting_hole_distance) {
 		}
 
 		// Funnel bottom close-off
+
+		intersection() {
+			translate([0, 0, -0.5]) {
+				cylinder(r1 = fan_dia / 2 - panel_thickness + 2, r2 = fan_dia / 2.625 - panel_thickness, h = 60.5);
+			}
+			rotate([0, -65, 0]) {
+				translate([fan_dia / 2 - 5, 0, fan_dia/2-1]) {
+					cube([fan_dia+45, fan_dia, panel_thickness], center = true);
+				}
+			}
+		}
+
+		/**
 		rotate([0, -65, 0]) {
 			translate([fan_dia / 2 - 5 + 7.5, 0, fan_dia-21.5]) {
 				cube([fan_dia+1, fan_dia-25, 2], center = true);
@@ -107,9 +120,10 @@ module fan_mount(panel_thickness, mounting_hole_distance) {
 				cube([fan_dia - 12, fan_dia-14, 2], center = true);
 			}
 			translate([fan_dia / 2 - 5 + 19, 0, fan_dia-21.5]) {
-				cube([fan_dia - 19.5, fan_dia-11, 2], center = true);
+				cube([fan_dia - 12, fan_dia-11, 2], center = true);
 			}
 		}
+		*/
 	}
 }
 
@@ -157,7 +171,7 @@ module mountEars(mountHeight = 10, mountSpacing = 2){
 }
 
 // A rounded rectangle that looks like a long pill
-module pill(length, r=5, h=2){
+module pill(length, r=5, h=2.2){
      hull() {
         translate([length, 0, 0]) cylinder(r=r, h=h);
         translate([0, 0, 0]) cylinder(r=r, h=h);
@@ -194,7 +208,7 @@ module carriageMountingBracket(mountHeight = 10, mountSpacing = 3.2){
 }
 
 // STL Creation / mockup mode options
-printPart = "mount"; // values "fan", "mount", "mockup"
+printPart = "mockup"; // values "fan", "mount", "mockup"
 
 wiggle=0.1; // values 0.1 - 0.2 seem about right.  
 
@@ -211,11 +225,11 @@ if (printPart == "fan" || printPart=="mockup"){
 if (printPart == "mockup"){ 
   rotate([180,0,0])
   translate([36,0,-10])
-  color("oliveDrab") carriageMountingBracket(10, 3.2);
+  color("oliveDrab") carriageMountingBracket(10, 3.3);
 }
 
 if (printPart == "mount"){
  translate([0,8,0])
  rotate([0,0,0])
- color("oliveDrab") carriageMountingBracket(10, 3.2);
+ color("oliveDrab") carriageMountingBracket(10, 3.3);
 }
