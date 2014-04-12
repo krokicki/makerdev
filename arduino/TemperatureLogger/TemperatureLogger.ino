@@ -15,6 +15,8 @@
 #include <Fat16util.h>
 #include <Battery.h>
 #include <OneWire.h>
+#include <DallasTemperature.h>
+#include <EEPROM.h>
 
 //#define DEBUG
 
@@ -25,7 +27,8 @@
 #define PgmLogln(x) Logln_P(PSTR(x))
 #define PgmError(x) Error_P(PSTR(x))
 
-#define LOOP_INTERVAL_SEC 300 // 5 minutes
+//#define LOOP_INTERVAL_SEC 300 // 5 minutes
+#define LOOP_INTERVAL_SEC 5 
 
 //The following code is taken from sleep.h as Arduino Software v22 (avrgcc) in w32 does not have the latest sleep.h file
 #define sleep_bod_disable() \
@@ -42,16 +45,43 @@
                          [not_bodse] "i" (~_BV(BODSE))); \
 }
 
-
-int oneWirePin = 6;
-int ledPin = 13; 
+// Data wire is plugged into port 2 on the Arduino
+#define ONE_WIRE_BUS 6
+#define LED_PIN 13
 
 DS3231 RTC; //Create RTC object for DS3231 RTC come Temp Sensor 
 DateTime interruptTime;
 SdCard card;
 Fat16 file;
 Battery battery;
-OneWire ds(oneWirePin);
+OneWire ds(ONE_WIRE_BUS);
+DallasTemperature sensors(&ds);
+
+const int numDevices = 20;
+char* idStrs[] = {
+"2881b859050000cc",
+"28f7245a050000f8",
+"28a3065a05000071",
+"28c05766050000e9",
+"28e8e259050000b1",
+"280e0a5a05000046",
+"28b7db59050000cc",
+"28f6d5590500002c",
+"2826cc5905000067",
+"28373c5a05000025",
+"285e27d10400009a",
+"289f0ad0040000a9",
+"28a12cd1040000bc",
+"287f48d0040000ea",
+"28913fd0040000ec",
+"28bdadd004000013",
+"28df11d0040000d0",
+"28bd4cd004000004",
+"28a65dd004000016",
+"283081d00400006a"
+};
+
+byte ids[numDevices][8];
 
 void setup () {
     /* Initialize INT0 pin for accepting interrupts */
@@ -59,7 +89,7 @@ void setup () {
     DDRD &=~ 0x04; // set pin 2 to OUTPUT
     
     pinMode(4, INPUT); // control SD card power
-    pinMode(ledPin, OUTPUT);
+    pinMode(LED_PIN, OUTPUT);
     Wire.begin();    
     RTC.begin();
 
@@ -92,6 +122,28 @@ void setup () {
 void loop () {
   
     ledOn();
+    
+    // Parse device addresses
+    for(int i=0; i<numDevices; i++) {
+      for(int j=0; j<8; j++) {
+          char strPart[3];
+          strPart[0] = idStrs[i][j*2];
+          strPart[1] = idStrs[i][j*2+1];
+          strPart[2] = NULL;
+          long unsigned int id = strtoul(strPart, NULL, 16);
+          ids[i][j] = id;
+      }
+    }
+
+//    #ifdef DEBUG 
+//      for(int i=0; i<numDevices; i++) {
+//        if (i>0) Serial.print("\t");
+//        Serial.print(idStrs[i]);
+//      }
+//      Serial.println();
+//    #endif
+    
+    sensors.begin();
       
     // Read time from RTC
     DateTime now = RTC.now();
@@ -105,9 +157,6 @@ void loop () {
     // Read built-in temperature
     RTC.convertTemperature();
     float internalTemp = RTC.getTemperature();
-    
-    // Read external temperature from OneWire temperature sensor
-    float externalTemp = getOneWireTemp();
     
     // Initialize the SD card
     if (!card.init()) PgmError("card.init");
@@ -147,17 +196,20 @@ void loop () {
     PgmLog(":");
     PgmLogDec(now.second());
     PgmLog(",");
-    PgmLogDouble(internalTemp);
-    PgmLog(",");
-    if (!isnan(externalTemp)) {
-      PgmLogDouble(externalTemp);
-    }
-    PgmLog(",");
     PgmLogDouble(voltage);
     PgmLog(",");
     PgmLogDec(percentage);
     PgmLog(",");
-    Logln(chargeStatus);
+    Log(chargeStatus);
+    PgmLog(",");
+    PgmLogDouble(internalTemp);
+    
+    for(int i=0; i<numDevices; i++) {
+      PgmLog(",");
+      PgmLogDouble(sensors.getTempC(ids[i]));   
+    }
+    
+    Logln("");
     
     if (!file.close()) {
       PgmError("error closing file");
@@ -248,13 +300,11 @@ float getOneWireTemp() {
 }
 
 void ledOn() {
-  digitalWrite(ledPin, HIGH);
-//    delay(100);  //50
+  digitalWrite(LED_PIN, HIGH);
 }
 
 void ledOff() {
- digitalWrite(ledPin, LOW);
-//    delay(100);  //100
+ digitalWrite(LED_PIN, LOW);
 }
 
 void Log(char* str) {
