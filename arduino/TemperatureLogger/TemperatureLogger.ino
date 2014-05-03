@@ -27,8 +27,8 @@
 #define PgmLogln(x) Logln_P(PSTR(x))
 #define PgmError(x) Error_P(PSTR(x))
 
-//#define LOOP_INTERVAL_SEC 300 // 5 minutes
-#define LOOP_INTERVAL_SEC 5 
+#define LOOP_INTERVAL_SEC 300 // 5 minutes
+//#define LOOP_INTERVAL_SEC 5 // 5 Seconds
 
 //The following code is taken from sleep.h as Arduino Software v22 (avrgcc) in w32 does not have the latest sleep.h file
 #define sleep_bod_disable() \
@@ -46,7 +46,7 @@
 }
 
 // Data wire is plugged into port 2 on the Arduino
-#define ONE_WIRE_BUS 6
+#define ONE_WIRE_BUS 4
 #define LED_PIN 13
 
 DS3231 RTC; //Create RTC object for DS3231 RTC come Temp Sensor 
@@ -92,6 +92,7 @@ void setup () {
     pinMode(LED_PIN, OUTPUT);
     Wire.begin();    
     RTC.begin();
+    sensors.begin();
 
     #ifdef DEBUG 
       Serial.begin(57600);
@@ -143,7 +144,8 @@ void loop () {
 //      Serial.println();
 //    #endif
     
-    sensors.begin();
+    // Read one-wire bus
+    sensors.requestTemperatures();
       
     // Read time from RTC
     DateTime now = RTC.now();
