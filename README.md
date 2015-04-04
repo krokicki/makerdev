@@ -1,6 +1,6 @@
 # [MakerDev](http://makerdev.com) 
 
-Here you will find 3d models (STL, OpenSCAD) for 3d printing, circuit board schematics (EAGLE), and code. These resources are made available by [makerdev.com](http://makerdev.com).
+Here you will find 3d models (STL, OpenSCAD) for 3d printing, circuit board schematics (EAGLE), and code for various maker projects. These resources are made available by [makerdev.com](http://makerdev.com).
 
 ## Copyright and License
 
