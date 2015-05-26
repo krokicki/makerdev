@@ -19,6 +19,7 @@ offsets = ((vdim[0]-sdim[0])/2.0, (vdim[1]-sdim[1])/2.0, (vdim[2]-sdim[2])/2.0)
 hw = vdim[1]/2
 zoom_factor = 50
 fixed_rotation = 45
+main_ren_pct = 7
 m = scipy.interpolate.interp1d([0,40],[0,255])
 vol = zeros(vdim, dtype=uint8)
 textActor = None
@@ -126,47 +127,49 @@ volume = vtk.vtkVolume()
 volume.SetMapper(volumeMapper)
 volume.SetProperty(volumeProperty)
  
-renderer = vtk.vtkRenderer()
 renderWin = vtk.vtkRenderWindow()
-renderWin.AddRenderer(renderer)
+renderWin.SetSize(800, 600)
+
 renderInteractor = vtk.vtkRenderWindowInteractor()
 renderInteractor.SetRenderWindow(renderWin)
+
+mainRenderer = vtk.vtkRenderer()
+renderWin.AddRenderer(mainRenderer)
+mainRenderer.SetViewport(0.3,0,1,1)
+mainRenderer.SetBackground(0,0,0)
+
+textRenderer = vtk.vtkRenderer()
+renderWin.AddRenderer(textRenderer)
+textRenderer.SetViewport(0,0,0.3,1)
+textRenderer.SetBackground(0.1,0.1,0.1)
 
 textActor = vtk.vtkTextActor()
 txtprop = textActor.GetTextProperty()
 txtprop.SetFontFamilyToArial()
 txtprop.SetFontSize(18)
 txtprop.SetColor(0.8,0.8,0.8)
-textActor.SetDisplayPosition(40,560)
-renderer.AddActor2D(textActor)
+textActor.SetDisplayPosition(30,560)
+textRenderer.AddActor2D(textActor)
 
-#camera = vtk.vtkCamera()
-# default (125.0, 124.5, 1199.9110460037089) 
-#camera.SetPosition(70, 70, 900)
-# default (125.0, 124.5, 124.29289321881348)
-#camera.SetFocalPoint(120, 120, 120)
- 
-#renderer.SetActiveCamera(camera)
-renderer.AddVolume(volume)
-renderer.SetBackground(0,0,0)
-renderWin.SetSize(800, 600)
+camera = vtk.vtkCamera()
+camera.SetPosition(vdim[0]/2, vdim[1]/2, 800)
+camera.SetFocalPoint(vdim[0]/2, vdim[1]/2, vdim[2]/2)
+mainRenderer.SetActiveCamera(camera)
 
+mainRenderer.AddVolume(volume)
+
+# Outline
 cube = vtk.vtkCubeSource()
 (x,y,z) = offsets
-print "sdim:",sdim
-print "vdim:",vdim
-print "offsets:",offsets
 cube.SetBounds(x,x+sdim[0],y,y+sdim[1],z,z+sdim[2])
 cube.Update()
-
 outline = vtk.vtkOutlineFilter()
-mapper2 = vtk.vtkPolyDataMapper()
+polyMapper = vtk.vtkPolyDataMapper()
 outline.SetInputConnection(cube.GetOutputPort())
-mapper2.SetInputConnection(outline.GetOutputPort())
+polyMapper.SetInputConnection(outline.GetOutputPort())
 outlineActor = vtk.vtkActor()
-outlineActor.SetMapper(mapper2)
-#outlineActor.GetProperty().SetRepresentationToWireframe()
-renderer.AddActor(outlineActor)
+outlineActor.SetMapper(polyMapper)
+mainRenderer.AddActor(outlineActor)
 
 if False and fixed_rotation:
     transform = vtk.vtkTransform()
@@ -192,7 +195,7 @@ class vtkTimerCallback():
         
     def execute(self,obj,event):
 
-        camera = renderer.GetActiveCamera()
+        camera = mainRenderer.GetActiveCamera()
         #print camera.GetPosition(), camera.GetFocalPoint()
         #camera.Yaw(self.r)
         #self.r += 1
