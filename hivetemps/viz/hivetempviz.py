@@ -1,10 +1,11 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 #
-# 4D Volume Gradient Movie Generator
-# 
+# 4D Volume Gradient 
 # Author: Konrad Rokicki
 #
 import sys
+import time
 from numpy import *
 import scipy 
 import scipy.interpolate 
@@ -18,19 +19,22 @@ vdim = (250, 250, 250)
 offsets = ((vdim[0]-sdim[0])/2.0, (vdim[1]-sdim[1])/2.0, (vdim[2]-sdim[2])/2.0)
 hw = vdim[1]/2
 zoom_factor = 50
-fixed_rotation = 45
 main_ren_pct = 7
 m = scipy.interpolate.interp1d([0,40],[0,255])
 vol = zeros(vdim, dtype=uint8)
 textActor = None
+offscreen = False
+outDir = "out"
 
 level_probes = [None] * levels
 for li in range(0,levels):
     level_probes[li] = ["T%i"%i for i in range(li*4+1,li*4+5)]
 
 def getSensorVolume(df, row):
+    if row>=df.shape[0]: return None
     vol = zeros((2, 5, 2))
     dateTxt = None
+    tempTxt = ""
     for li in range(0,5):
         df2 = df.ix[row, level_probes[li]]
         v = df2.values
@@ -39,16 +43,23 @@ def getSensorVolume(df, row):
         vol[0][li][1] = v[2]
         vol[1][li][1] = v[3]
         dateTxt = str(df2.name)
+        if li>0: tempTxt += "\n\n"
+        tempTxt += "%2.2f %2.2f %2.2f %2.2f" % (v[0],v[1],v[2],v[3])
 
     global textActor
-    textActor.SetInput(dateTxt)
+    (currDate,currTime) = dateTxt.split(" ")
+    textActor.SetInput("Makerdev\nApicultural Telemetry\n\nHive: Janelia 1\n\nDate: "+currDate+"\n\nTime: "+currTime+"\n\n\nTemperatures:\n(Celcius)\n\n"+tempTxt)
     global m
     alpha = m(vol)
-    zoomed = scipy.ndimage.zoom(alpha, zoom_factor)
+    start_time = time.time()
+    zoomed = scipy.ndimage.zoom(alpha, zoom_factor, order=2)
+    elapsed_time = time.time() - start_time
+    #print "Zoom took %2.2f sec"%(elapsed_time)
     return zoomed
 
 def getIntensityVolume(df, row):
     svol = getSensorVolume(df, row)
+    if svol is None: return None
     global vol
     # Pad sensor data into a cube shape for rendering
     (x,y,z) = offsets
@@ -56,10 +67,8 @@ def getIntensityVolume(df, row):
     vol[x:x+sdim[0], y:y+2, z:z+sdim[2]] = 255
     return vol
 
-
-print "Loading data"
-
-filepath = "/Users/rokickik/Dropbox/MakerDev/BeeMonitor/2015-03/201405-201503.log"
+filepath = sys.argv[1]
+print "Loading data from %s"%filepath
 probe_names = [ "T%i"%i for i in range(1,21) ]
 col_names = ['Date','Time','Voltage','Charge','IsCharging','TEnclosure']
 col_names += probe_names
@@ -78,11 +87,7 @@ df = df.replace(to_replace=85, value=0)
 df.rename(columns={'T16': 'T_13', 'T13': 'T_14', 'T14': 'T_15', 'T15': 'T_16'}, inplace=True)
 df.rename(columns={'T_13': 'T13', 'T_14': 'T14', 'T_15': 'T15', 'T_16': 'T16'}, inplace=True)
 
-df2 = df.ix[:, probe_names]
-#df2 = df2.resample('1D', how='mean')
-#df2 = df2.ix['2014-06-02':'2014-06-02']
-
-print "Rendering"
+print "Rendering %d frames" % df.shape[0]
 
 # Import data into VTK format
 dataImporter = vtk.vtkImageImport()
@@ -90,12 +95,12 @@ dataImporter.SetDataScalarTypeToUnsignedChar()
 dataImporter.SetDataExtent(0, vdim[0]-1, 0, vdim[1]-1, 0, vdim[2]-1)
 dataImporter.SetWholeExtent(0, vdim[0]-1, 0, vdim[1]-1, 0, vdim[2]-1)
 
-i = 0
-def updateData():
-    global i
-    data_string = getIntensityVolume(df2, i).tostring()
+def updateData(row):
+    ivol = getIntensityVolume(df, row)
+    if ivol is None: return False
+    data_string = ivol.tostring()
     dataImporter.CopyImportVoidPointer(data_string, len(data_string))
-    i += 10
+    return True
 
 # Just intensity values
 dataImporter.SetNumberOfScalarComponents(1)
@@ -106,7 +111,7 @@ alphaChannelFunc.AddPoint(0, 0.0)
 alphaChannelFunc.AddPoint(140, 0.0)
 alphaChannelFunc.AddPoint(220, 0.05)
 alphaChannelFunc.AddPoint(254, 0.5)
-alphaChannelFunc.AddPoint(255, 1.0)
+alphaChannelFunc.AddPoint(255, 0.0)
  
 # Color transfer function
 colorFunc = vtk.vtkColorTransferFunction()
@@ -129,9 +134,9 @@ volume.SetProperty(volumeProperty)
  
 renderWin = vtk.vtkRenderWindow()
 renderWin.SetSize(800, 600)
-
-renderInteractor = vtk.vtkRenderWindowInteractor()
-renderInteractor.SetRenderWindow(renderWin)
+if offscreen:
+    print "Will render to PNG files"
+    renderWin.SetOffScreenRendering(1)
 
 mainRenderer = vtk.vtkRenderer()
 renderWin.AddRenderer(mainRenderer)
@@ -148,7 +153,7 @@ txtprop = textActor.GetTextProperty()
 txtprop.SetFontFamilyToArial()
 txtprop.SetFontSize(18)
 txtprop.SetColor(0.8,0.8,0.8)
-textActor.SetDisplayPosition(30,560)
+textActor.SetDisplayPosition(20,100)
 textRenderer.AddActor2D(textActor)
 
 camera = vtk.vtkCamera()
@@ -171,59 +176,70 @@ outlineActor = vtk.vtkActor()
 outlineActor.SetMapper(polyMapper)
 mainRenderer.AddActor(outlineActor)
 
-if False and fixed_rotation:
+r = 0
+def updateTransforms(frame):
+    if frame % 2: return
     transform = vtk.vtkTransform()
     transform.PostMultiply()
     transform.Translate(-1*hw,-1*hw,-1*hw)
-    transform.RotateWXYZ(90,0,0,1)
-    transform.RotateWXYZ(fixed_rotation,0,1,0)
+    global r
+    transform.RotateWXYZ(r,0,1,0)
+    r += 1
+    if r >= 360: r = 0
     transform.Translate(hw,hw,hw)
     volume.SetUserTransform(transform)
     outlineActor.SetUserTransform(transform)
 
-# A simple function to be called when the user decides to quit the application.
-def exitCheck(obj, event):
-    if obj.GetEventPending() != 0:
-        obj.SetAbortRender(1)
- 
-renderWin.AddObserver("AbortCheckEvent", exitCheck)
-
-
 class vtkTimerCallback():
     def __init__(self):
-        self.r = 0
+        self.frame = 0
         
     def execute(self,obj,event):
-
         camera = mainRenderer.GetActiveCamera()
-        #print camera.GetPosition(), camera.GetFocalPoint()
-        #camera.Yaw(self.r)
-        #self.r += 1
-        
-        if not(fixed_rotation):
-            transform = vtk.vtkTransform()
-            transform.PostMultiply()
-            transform.Translate(-1*hw,-1*hw,-1*hw)
-            transform.RotateWXYZ(90,0,0,1)
-            transform.RotateWXYZ(self.r,0,1,0)
-            self.r += 1
-            if self.r >= 360: self.r = 0
-            transform.Translate(hw,hw,hw)
-            volume.SetUserTransform(transform)
-            outlineActor.SetUserTransform(transform)
-
-        updateData()
+        updateData(self.frame)
+        #updateTransforms(self.frame)
+        self.frame += 20
         obj.GetRenderWindow().Render()
 
-renderInteractor.Initialize()
-# Because nothing will be rendered without any input, we order the first render manually before control is handed over to the main-loop.
-updateData()
-renderWin.Render()
+if offscreen:
+    i = 0
+    start_time = time.time()
+    while updateData(i):
+        elapsed_time = time.time() - start_time
+        print "Loading data took %2.2f sec"%(elapsed_time)
+        start_time = time.time()
+        updateTransforms(i)
+        renderWin.Render()
+        windowToImageFilter = vtk.vtkWindowToImageFilter()
+        windowToImageFilter.SetInput(renderWin)
+        windowToImageFilter.Update()
+        writer = vtk.vtkPNGWriter()
+        filename = "%s/render_%06d.png"%(outDir,i)
+        writer.SetFileName(filename)
+        writer.SetInputConnection(windowToImageFilter.GetOutputPort())
+        writer.Write()
+        i+=1
+        elapsed_time = time.time() - start_time
+        print "Writing %s took %2.2f sec"%(filename,elapsed_time)
+        start_time = time.time()
+        if i>10: break
 
-# Sign up to receive TimerEvent
-cb = vtkTimerCallback()
-renderInteractor.AddObserver('TimerEvent', cb.execute)
-timerId = renderInteractor.CreateRepeatingTimer(1000);
+else:
+    def exitCheck(obj, event):
+        if obj.GetEventPending() != 0:
+            obj.SetAbortRender(1)
+     
+    renderWin.AddObserver("AbortCheckEvent", exitCheck)
 
-renderInteractor.Start()
+    renderInteractor = vtk.vtkRenderWindowInteractor()
+    renderInteractor.SetRenderWindow(renderWin)
+    renderInteractor.Initialize()
+
+    updateData(0)
+    renderWin.Render()
+
+    cb = vtkTimerCallback()
+    renderInteractor.AddObserver('TimerEvent', cb.execute)
+    timerId = renderInteractor.CreateRepeatingTimer(1000);
+    renderInteractor.Start()
 
