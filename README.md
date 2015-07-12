@@ -4,7 +4,7 @@ Here you will find 3d models (STL, OpenSCAD) for 3d printing, circuit board sche
 
 ## Copyright and License
 
-Copyright 2013 Konrad Rokicki
+Copyright 2015 Konrad Rokicki
 
 Licensed under CC BY-SA 3.0 US. See LICENSE.txt for more information.
 
