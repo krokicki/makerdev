@@ -6,12 +6,17 @@
 import os, errno
 import sys
 import time
-from numpy import *
+import numpy as np
 import scipy
 import scipy.interpolate
 import scipy.ndimage
 import pandas as pd
 import vtk
+
+np.set_printoptions(threshold=np.nan)
+
+def roundUp(v): return float(int(v*100)+1)/100
+def roundDown(v): return float(int(v*100))/100
 
 levels = 5
 sdim = (100, 250, 100)
@@ -20,9 +25,13 @@ offsets = ((vdim[0]-sdim[0])/2.0, (vdim[1]-sdim[1])/2.0, (vdim[2]-sdim[2])/2.0)
 hw = vdim[1]/2
 zoom_factor = 50
 main_ren_pct = 7
-vol = zeros(vdim, dtype=uint8)
+vol = np.zeros(vdim, dtype=np.uint8)
 textActor = None
 offscreen = False
+calc_extents = None # extents calculated by actually interpolating all the data with splines
+calculate_extents = False
+static_time = None
+rotate_every_nth_frame = 4
 
 level_probes = [None] * levels
 for li in range(0,levels):
@@ -38,39 +47,65 @@ def mkdirs(path):
 
 def getSensorVolume(df, row):
     if row>=df.shape[0]: return None
-    vol = zeros((2, 5, 2))
+    vol = np.zeros((2, 5, 2))
     dateTxt = None
     tempTxt = ""
     for li in range(0,5):
         df2 = df.ix[row, level_probes[li]]
         v = df2.values
-        vol[1][li][0] = v[0]
-        vol[0][li][0] = v[1]
-        vol[0][li][1] = v[2]
-        vol[1][li][1] = v[3]
+        vi = levels-li-1 # vertical flip because y=0 is at the bottom of the screen
+        vol[1][vi][0] = v[0]
+        vol[0][vi][0] = v[1]
+        vol[0][vi][1] = v[2]
+        vol[1][vi][1] = v[3]
         dateTxt = str(df2.name)
         if li>0: tempTxt += "\n\n"
         tempTxt += "%2.2f %2.2f %2.2f %2.2f" % (v[0],v[1],v[2],v[3])
 
     global textActor
-    (currDate,currTime) = dateTxt.split(" ")
-    textActor.SetInput("Makerdev\nApicultural Telemetry\n\nHive: Janelia 1\n\nDate: %s\n\nTime: %s\n\nFrame: %d\n\nTemperatures:\n(Celcius)\n\n%s"%(currDate,currTime,row,tempTxt))
-    global m
-    alpha = m(vol)
-    start_time = time.time()
-    zoomed = scipy.ndimage.zoom(alpha, zoom_factor, order=2)
-    elapsed_time = time.time() - start_time
-    #print "Zoom took %2.2f sec"%(elapsed_time)
+    if textActor:
+        (currDate,currTime) = dateTxt.split(" ")
+        if static_time: currTime = static_time
+        textActor.SetInput("Makerdev\nApicultural Telemetry\n\nHive: Janelia 1\n\nDate: %s\n\nTime: %s\n\nFrame: %d\n\nTemperatures:\n(Celcius)\n\n%s"%(currDate,currTime,row,tempTxt))
+
+    #zoomed = scipy.ndimage.zoom(alpha, 3, order=2)
+    #with file("frame_%s.txt"%row, 'w') as outfile:
+    #    outfile.write('# Temps ({0})\n'.format(vol.shape))
+    #    for slice_2d in vol:
+    #        np.savetxt(outfile, slice_2d, fmt='%-3.2f')
+    #        outfile.write('# New slice\n')
+    #    outfile.write('\n# Alphas ({0})\n'.format(alpha.shape))
+    #    for slice_2d in alpha:
+    #        np.savetxt(outfile, slice_2d, fmt='%-3.2f')
+    #        outfile.write('# New slice\n')
+    #    outfile.write('\n# Zoomed ({0})\n'.format(zoomed.shape))
+    #    for slice_2d in zoomed:
+    #        np.savetxt(outfile, slice_2d, fmt='%-3.2f')
+    #        outfile.write('# New slice\n')
+
+    zoomed = scipy.ndimage.zoom(vol, zoom_factor, order=2)
+
+    if calculate_extents:
+        amin = np.amin(zoomed)
+        amax = np.amax(zoomed)
+        if amin<calc_extents[0]: calc_extents[0]=amin
+        if amax>calc_extents[1]: calc_extents[1]=amax
+
     return zoomed
 
 def getIntensityVolume(df, row):
+
     svol = getSensorVolume(df, row)
     if svol is None: return None
+
+    global m
+    alpha = m(svol)
+
     global vol
     # Pad sensor data into a cube shape for rendering
     (x,y,z) = offsets
-    vol[x:x+sdim[0], y:y+sdim[1], z:z+sdim[2]] = svol
-    # the "ground" 
+    vol[x:x+sdim[0], y:y+sdim[1], z:z+sdim[2]] = alpha
+    # the "ground"
     #vol[x:x+sdim[0], y:y+2, z:z+sdim[2]] = 255
     return vol
 
@@ -80,12 +115,16 @@ parser.add_argument("inputFile", help="Input CSV file")
 parser.add_argument("-o", "--outDir", help="Directory where to render offscreen frames")
 parser.add_argument("-s", "--start", help="Start rendering at the given row", type=int)
 parser.add_argument("-e", "--end", help="End rendering at the given row", type=int)
+parser.add_argument("--min", help="Min value (if this isn't provided it will be calculated very slowly)", type=float)
+parser.add_argument("--max", help="Max value (if this isn't provided it will be calculated very slowly)", type=float)
 args = parser.parse_args()
 
 filepath = args.inputFile
 startFrame = args.start
 endFrame = args.end
 outDir = args.outDir
+minValue = args.min
+maxValue = args.max
 
 if outDir:
     mkdirs(outDir)
@@ -111,14 +150,45 @@ df = df.replace(to_replace=85, value=0)
 df.rename(columns={'T16': 'T_13', 'T13': 'T_14', 'T14': 'T_15', 'T15': 'T_16'}, inplace=True)
 df.rename(columns={'T_13': 'T13', 'T_14': 'T14', 'T_15': 'T15', 'T_16': 'T16'}, inplace=True)
 
-# Probe value extents
+# Select required data
+
+# All data. Use --min -21.20 --max 42.09
+# Actually need --min -21.30 --max 42.09
+
+# Daily 3-5am mean. Use --min 11.93 --max 36.82
+
+# Daily 4-5am mean. Use --min -17.81 --max 36.85
+#df = df.between_time('4:00','5:00').resample('D', how = 'mean')
+#static_time = "Avg of 4am-5am"
+#rotate_every_nth_frame = 2
+
+# Daily mean
+#df = df.resample('D', how = 'mean')
+#static_time = "Daily Average"
+#rotate_every_nth_frame = 2
+
+# Get extents for interpolation
+totalFrames = df.shape[0]
 pv = df.ix[:,probe_names]
-extents = ( pv.min().min(), pv.max().max() )
+calc_extents = [ pv.min().min(), pv.max().max() ]
+if not(minValue) or not(maxValue):
+    print "Temperature value range: %2.2f - %2.2f" % tuple(calc_extents)
+    print "Calculating true extents... this will take a long time!"
+    calculate_extents = True
+    for row in range(1,totalFrames):
+        getSensorVolume(df, row)
+        if row%100==0:
+            print "Processed %d rows, current value range: %2.4f - %2.4f" % (row,calc_extents[0],calc_extents[1])
+    print "In the future, you can use '--min %2.2f --max %2.2f' to skip the previous step." % (roundDown(calc_extents[0]), roundUp(calc_extents[1]))
+    extents = (calc_extents[0], calc_extents[1])
+else:
+    extents = (minValue, maxValue)
+
+
 print "Value range: %2.2f - %2.2f" % extents
 m = scipy.interpolate.interp1d(extents, [0,255])
 
-totalFrames = df.shape[0]
-print "Rendering %d frames" % totalFrames
+print "Total frames: %d" % totalFrames
 
 if startFrame:
     print "Will start rendering at frame %d"%startFrame
@@ -129,6 +199,8 @@ if endFrame:
     print "Will end rendering at frame %d"%endFrame
 else:
     endFrame = totalFrames-1
+
+print "Rendering %d frames" % (endFrame-startFrame)
 
 # Import data into VTK format
 dataImporter = vtk.vtkImageImport()
@@ -163,7 +235,7 @@ if extents[0]>=0:
     alphaChannelFunc.AddPoint(140, 0.005)
     alphaChannelFunc.AddPoint(180, 0.006)
     alphaChannelFunc.AddPoint(250, 0.1)
-    alphaChannelFunc.AddPoint(255, 0.5)
+    alphaChannelFunc.AddPoint(255, 0.2)
 
 else:
     # Mapping for a year-round range (-20 to 40)
@@ -179,9 +251,7 @@ else:
     # Alpha transfer function
     alphaChannelFunc = vtk.vtkPiecewiseFunction()
     alphaChannelFunc.AddPoint(0, 0.0)
-    alphaChannelFunc.AddPoint(5, 0.1)
     alphaChannelFunc.AddPoint(64, 0.001)
-    alphaChannelFunc.AddPoint(80, 0.0)
     alphaChannelFunc.AddPoint(191, 0.006)
     alphaChannelFunc.AddPoint(250, 0.1)
     alphaChannelFunc.AddPoint(255, 0.5)
@@ -246,7 +316,7 @@ mainRenderer.AddActor(outlineActor)
 r = 0
 def updateTransforms(frame):
     global r
-    nr = int(floor(frame/4)) % 360
+    nr = int(np.floor(frame/rotate_every_nth_frame)) % 360
     if r==nr: return
     r = nr
     transform = vtk.vtkTransform()
@@ -265,7 +335,7 @@ class vtkTimerCallback():
     def execute(self,obj,event):
         if self.frame<=endFrame:
             updateData(self.frame)
-            self.frame += 20
+            self.frame += 5
         obj.GetRenderWindow().Render()
 
 if offscreen:
